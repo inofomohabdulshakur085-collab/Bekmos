@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Background Remover Pro</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1"></script>
+
+<style>
+*{box-sizing:border-box}
+body{
+font-family:Arial,Helvetica,sans-serif;
+margin:0;
+background:#0f172a;
+color:#fff;
+}
+header{
+background:#020617;
+padding:15px;
+text-align:center;
+font-size:22px;
+font-weight:bold;
+}
+.container{
+max-width:900px;
+margin:auto;
+padding:20px;
+}
+.card{
+background:#020617;
+border-radius:12px;
+padding:20px;
+box-shadow:0 0 15px rgba(0,0,0,0.6);
+margin-bottom:20px;
+}
+h2{margin-top:0}
+input,select,button{
+padding:10px;
+border-radius:6px;
+border:none;
+margin:5px 0;
+}
+button{
+background:#2563eb;
+color:white;
+cursor:pointer;
+font-weight:bold;
+}
+button:hover{opacity:0.9}
+button:disabled{background:#555}
+.preview{
+display:grid;
+grid-template-columns:1fr 1fr;
+gap:20px;
+}
+.preview img,canvas{
+width:100%;
+border-radius:10px;
+background:#020617;
+border:1px solid #1e293b;
+}
+.tools{
+display:flex;
+flex-wrap:wrap;
+gap:10px;
+margin:10px 0;
+}
+.loader{
+display:none;
+padding:10px;
+color:#38bdf8;
+}
+footer{
+text-align:center;
+padding:15px;
+background:#020617;
+color:#94a3b8;
+font-size:14px;
+}
+@media(max-width:700px){
+.preview{grid-template-columns:1fr}
+}
+</style>
+</head>
+
+<body>
+
+<header>AI Background Remover Pro (100% Serverless)</header>
+
+<div class="container">
+
+<div class="card">
+<h2>1. Upload Images</h2>
+<input type="file" id="imageInput" accept="image/*" multiple>
+<p>You can upload multiple images</p>
+</div>
+
+<div class="card">
+<h2>2. Edit Options</h2>
+
+<div class="tools">
+<label>Background:</label>
+<select id="bgMode">
+<option value="transparent">Transparent</option>
+<option value="color">Solid Color</option>
+<option value="image">Image</option>
+</select>
+
+<input type="color" id="bgColor" value="#ffffff">
+<input type="file" id="bgImage" accept="image/*">
+
+<label>Quality</label>
+<select id="quality">
+<option value="1">High</option>
+<option value="0.8">Medium</option>
+<option value="0.6">Low</option>
+</select>
+
+<button id="processBtn">Process Images</button>
+</div>
+
+<div class="loader" id="loader">Loading AI Model / Processing...</div>
+</div>
+
+<div class="card">
+<h2>3. Preview</h2>
+<div class="preview" id="previewArea"></div>
+</div>
+
+<div class="card">
+<h2>4. Download</h2>
+<button id="downloadAll">Download All (ZIP)</button>
+<p>Images saved as PNG with background removed</p>
+</div>
+
+</div>
+
+<footer>
+Powered by Browser AI • No Server • No API Key
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+
+<script>
+
+const input = document.getElementById('imageInput');
+const processBtn = document.getElementById('processBtn');
+const loader = document.getElementById('loader');
+const previewArea = document.getElementById('previewArea');
+const bgMode = document.getElementById('bgMode');
+const bgColor = document.getElementById('bgColor');
+const bgImageInput = document.getElementById('bgImage');
+const qualitySelect = document.getElementById('quality');
+const downloadAllBtn = document.getElementById('downloadAll');
+
+let images = [];
+let results = [];
+let remover = null;
+let bgImage = null;
+
+bgImageInput.addEventListener('change', e=>{
+const file = e.target.files[0];
+if(!file) return;
+const img = new Image();
+img.src = URL.createObjectURL(file);
+bgImage = img;
+});
+
+async function loadModel(){
+loader.style.display='block';
+remover = await window.transformers.pipeline(
+'image-segmentation',
+'Xenova/modnet'
+);
+loader.style.display='none';
+}
+
+loadModel();
+
+input.addEventListener('change', e=>{
+images = [...e.target.files];
+previewArea.innerHTML='';
+results=[];
+
+images.forEach(file=>{
+const img=document.createElement('img');
+img.src=URL.createObjectURL(file);
+previewArea.appendChild(img);
+});
+});
+
+processBtn.addEventListener('click', async ()=>{
+if(!images.length || !remover){
+alert('Upload images and wait for model');
+return;
+}
+
+loader.style.display='block';
+processBtn.disabled=true;
+previewArea.innerHTML='';
+results=[];
+
+for(const file of images){
+const img = new Image();
+img.src = URL.createObjectURL(file);
+await img.decode();
+
+const result = await remover(img);
+const mask = result[0].mask;
+
+const canvas = document.createElement('canvas');
+const ctx = canvas.getContext('2d');
+
+canvas.width = img.width;
+canvas.height = img.height;
+
+if(bgMode.value==='color'){
+ctx.fillStyle = bgColor.value;
+ctx.fillRect(0,0,canvas.width,canvas.height);
+}
+
+if(bgMode.value==='image' && bgImage){
+ctx.drawImage(bgImage,0,0,canvas.width,canvas.height);
+}
+
+ctx.drawImage(img,0,0);
+
+let data = ctx.getImageData(0,0,canvas.width,canvas.height);
+let d = data.data;
+
+for(let i=0;i<mask.data.length;i++){
+let a = mask.data[i]*255;
+if(bgMode.value==='transparent'){
+d[i*4+3]=a;
+}else{
+d[i*4+3]=255;
+}
+}
+
+ctx.putImageData(data,0,0);
+
+results.push(canvas);
+previewArea.appendChild(canvas);
+}
+
+loader.style.display='none';
+processBtn.disabled=false;
+});
+
+downloadAllBtn.addEventListener('click', async ()=>{
+if(!results.length){
+alert('Nothing to download');
+return;
+}
+
+const zip = new JSZip();
+
+for(let i=0;i<results.length;i++){
+const canvas = results[i];
+const q = parseFloat(qualitySelect.value);
+
+const blob = await new Promise(r=>
+canvas.toBlob(r,'image/png',q)
+);
+
+zip.file(`image_${i+1}.png`, blob);
+}
+
+const content = await zip.generateAsync({type:'blob'});
+saveAs(content,'cleaned_images.zip');
+});
+
+</script>
+
+</body>
+</html>
